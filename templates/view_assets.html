@@ -4,6 +4,10 @@
     <title>View Assets</title>
 </head>
 <body>
+    <form action="/view" method="GET">
+        <input type="text" name="search" placeholder="Search assets..." value="{{ search if search else '' }}">
+        <button type="submit">Search</button>
+    </form>
     <h1>All IT Assets</h1>
     <table border="1">
         <thead>

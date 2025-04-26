@@ -47,12 +47,20 @@ def add_asset():
 
 @app.route('/view')
 def view_assets():
+    search_query = request.args.get('search', '')
     conn = sqlite3.connect('assets.db')
     c = conn.cursor()
-    c.execute("SELECT * FROM assets")
+
+    if search_query:
+        query = "SELECT * FROM assets WHERE asset_name LIKE ? OR assigned_to LIKE ?"
+        params = (f'%{search_query}%', f'%{search_query}%')
+        c.execute(query, params)
+    else:
+        c.execute("SELECT * FROM assets")
+
     assets = c.fetchall()
     conn.close()
-    return render_template('view_assets.html', assets=assets)
+    return render_template('view_assets.html', assets=assets, search=search_query)
 
 if __name__ == '__main__':
     app.run(debug=True)
