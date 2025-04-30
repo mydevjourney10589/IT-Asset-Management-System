@@ -5,6 +5,18 @@
 </head>
 <body>
     <h1>All IT Assets</h1>
+
+    <div>
+        <label for="statusFilter">Filter by Status:</label>
+        <select id="statusFilter">
+            <option value="All">All</option>
+            <option value="Active">Active</option>
+            <option value="Retired">Retired</option>
+            <option value="Missing">Missing</option>
+        </select>
+    </div>
+    <br>
+
     <table border="1">
         <thead>
             <tr>
@@ -25,5 +37,22 @@
             {% endfor %}
         </tbody>
     </table>
+
+    <script>
+        const statusFilter = document.getElementById('statusFilter');
+        const currentStatus = '{{ current_status or "All" }}'; // Get status from Flask context or default to "All"
+
+        // Set the initial value of the dropdown
+        statusFilter.value = currentStatus;
+
+        statusFilter.addEventListener('change', function() {
+            const selectedStatus = this.value;
+            if (selectedStatus.toLowerCase() === 'all') {
+                window.location.href = '/view'; // Redirect to /view without status query param for "All"
+            } else {
+                window.location.href = `/view?status=${selectedStatus}`;
+            }
+        });
+    </script>
 </body>
 </html>
