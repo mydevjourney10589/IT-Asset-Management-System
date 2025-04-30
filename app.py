@@ -1,7 +1,9 @@
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, session, url_for # Import session and url_for
 import sqlite3
+import os # Import os module
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24) # Add secret key for sessions
 
 # Initialize DB
 def init_db():
@@ -75,29 +77,40 @@ def add_asset():
         conn.commit()
         conn.close()
 
-        return redirect('/view')
+        # Retrieve last status filter from session, default to 'Active'
+        last_status = session.get('last_status_filter', 'Active')
+        # Redirect back to the view page with the last used filter applied
+        return redirect(url_for('view_assets', status=last_status))
 
     return render_template('add_asset.html')
 
 @app.route('/view')
 def view_assets():
-    status_filter = request.args.get('status') # Get status from the actual request
-    assets = get_assets_by_status(status_filter) # Use the helper function
+    requested_status = request.args.get('status') # Get status from the actual request
+    # Default to 'Active' if no status is provided in the URL
+    status_filter = requested_status if requested_status is not None else 'Active'
+    # Store the applied filter in the session
+    session['last_status_filter'] = status_filter
+    assets = get_assets_by_status(status_filter) # Use the helper function with the determined filter
+    # Pass the filter actually used (default or requested) to the template
     return render_template('view_assets.html', assets=assets, current_status=status_filter)
 
 # Test Runner Function
 def run_tests():
     print("Running tests...")
     populate_test_data() # Ensure clean test data
+    client = app.test_client() # Create a test client
 
-    # Test cases: (status_filter, expected_count, expected_statuses)
+    print("\n--- Testing get_assets_by_status ---")
+    # Test cases for get_assets_by_status: (status_filter, expected_count, expected_statuses)
     test_cases = [
         ('Active', 3, {'Active'}),
         ('Retired', 2, {'Retired'}),
         ('Missing', 1, {'Missing'}),
         ('all', 6, {'Active', 'Retired', 'Missing'}), # Case-insensitivity check for 'all'
         ('All', 6, {'Active', 'Retired', 'Missing'}),
-        (None, 6, {'Active', 'Retired', 'Missing'}), # Default (no filter)
+        # (None, 6, {'Active', 'Retired', 'Missing'}), # Old Default (no filter shows all) - No longer applies
+        (None, 3, {'Active'}), # New Default (no filter shows 'Active')
         ('NonExistentStatus', 0, set()) # Test status with no assets
     ]
 
@@ -128,18 +141,75 @@ def run_tests():
              print(f"  [FAIL] Status check: Expected 0 assets but got some.")
              all_tests_passed = False
 
+    print("\n--- Testing /view session setting ---")
+    view_session_tests_passed = True
+    test_view_statuses = ['Retired', 'All', 'Active', None] # Include None for default check
+    for status in test_view_statuses:
+        print(f"\nTesting /view with status: {status}")
+        expected_session_status = status if status is not None else 'Active' # Determine expected status in session
+        url = url_for('view_assets', status=status) if status is not None else url_for('view_assets')
+        client.get(url) # Access the view page to set the session
+        with client.session_transaction() as sess:
+            actual_session_status = sess.get('last_status_filter')
+            if actual_session_status == expected_session_status:
+                 print(f"  [PASS] Session check: Expected '{expected_session_status}', Got '{actual_session_status}'")
+            else:
+                 print(f"  [FAIL] Session check: Expected '{expected_session_status}', Got '{actual_session_status}'")
+                 view_session_tests_passed = False
+                 all_tests_passed = False
+
+
+    print("\n--- Testing /add redirect based on session ---")
+    add_redirect_tests_passed = True
+    test_redirect_statuses = ['Missing', 'Active', 'All']
+    for test_status in test_redirect_statuses:
+        print(f"\nTesting /add redirect with session status: {test_status}")
+        # Manually set session variable for the test client
+        with client.session_transaction() as sess:
+            sess['last_status_filter'] = test_status
+
+        # Simulate POST request to /add
+        response = client.post(url_for('add_asset'), data={
+            'asset_name': 'Test Asset',
+            'asset_type': 'Test Type',
+            'assigned_to': 'Tester',
+            'status': 'Active' # Asset's own status doesn't affect redirect
+        }, follow_redirects=False) # Don't follow the redirect automatically
+
+        # Check redirect status code
+        if response.status_code == 302:
+            print(f"  [PASS] Redirect status code: Got {response.status_code}")
+        else:
+            print(f"  [FAIL] Redirect status code: Expected 302, Got {response.status_code}")
+            add_redirect_tests_passed = False
+            all_tests_passed = False
+
+        # Check redirect location header
+        expected_location = url_for('view_assets', status=test_status)
+        actual_location = response.location
+        # Normalize URLs for comparison (e.g., handle potential leading slashes or full URLs)
+        if actual_location and actual_location.endswith(expected_location):
+             print(f"  [PASS] Redirect location: Expected ends with '{expected_location}', Got '{actual_location}'")
+        else:
+             print(f"  [FAIL] Redirect location: Expected ends with '{expected_location}', Got '{actual_location}'")
+             add_redirect_tests_passed = False
+             all_tests_passed = False
+
 
     print("\n--------------------")
     if all_tests_passed:
         print("All tests passed!")
     else:
         print("Some tests FAILED!")
+        if not view_session_tests_passed: print(" - /view session setting tests failed")
+        if not add_redirect_tests_passed: print(" - /add redirect tests failed")
     print("--------------------")
     return all_tests_passed
 
 
 if __name__ == '__main__':
     # Run tests before starting the server
-    run_tests()
-    # Start the Flask app (optional, comment out if only running tests)
-    # app.run(debug=True)
+    test_result = run_tests()
+    # Start the Flask app (optional, comment out if only running tests and tests passed)
+    # if test_result:
+    #    app.run(debug=True)
