@@ -1,6 +1,8 @@
-from flask import Flask, render_template, request, redirect, session, url_for # Import session and url_for
+from flask import Flask, render_template, request, redirect, session, url_for, Response # Import Response
 import sqlite3
 import os # Import os module
+import io # Import io for CSV
+import csv # Import csv module
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24) # Add secret key for sessions
@@ -94,6 +96,36 @@ def view_assets():
     assets = get_assets_by_status(status_filter) # Use the helper function with the determined filter
     # Pass the filter actually used (default or requested) to the template
     return render_template('view_assets.html', assets=assets, current_status=status_filter)
+
+@app.route('/export_csv')
+def export_csv():
+    """Exports the currently filtered assets to a CSV file."""
+    requested_status = request.args.get('status')
+    # Default to 'Active' if no status is provided in the URL query parameter
+    status_filter = requested_status if requested_status is not None else 'Active'
+
+    # Fetch the assets using the same logic as the view route
+    assets = get_assets_by_status(status_filter)
+
+    # Generate CSV data in memory
+    si = io.StringIO()
+    writer = csv.writer(si)
+
+    # Write header row (matching the columns in view_assets.html)
+    writer.writerow(['Asset Name', 'Type', 'Assigned To', 'Status'])
+
+    # Write data rows from the fetched assets (indices 1, 2, 3, 4)
+    for asset in assets:
+        writer.writerow([asset[1], asset[2], asset[3], asset[4]])
+
+    csv_data = si.getvalue()
+
+    # Create the Flask Response object
+    response = Response(csv_data, mimetype='text/csv')
+    # Set headers for file download
+    response.headers['Content-Disposition'] = 'attachment; filename=assets.csv'
+
+    return response
 
 # Test Runner Function
 def run_tests():
@@ -195,6 +227,81 @@ def run_tests():
              add_redirect_tests_passed = False
              all_tests_passed = False
 
+    print("\n--- Testing /export_csv ---")
+    csv_tests_passed = True
+    # Define expected CSV outputs based on populate_test_data()
+    # Note: csv.writer uses \r\n by default
+    csv_header = "Asset Name,Type,Assigned To,Status\r\n"
+    expected_csv = {
+        'Active': csv_header + \
+                  "Laptop 1,Hardware,Alice,Active\r\n" + \
+                  "Software License,Software,Bob,Active\r\n" + \
+                  "Keyboard,Hardware,Alice,Active\r\n",
+        'Retired': csv_header + \
+                   "Old Server,Hardware,Charlie,Retired\r\n" + \
+                   "Retired Laptop,Hardware,Eve,Retired\r\n",
+        'Missing': csv_header + \
+                   "Missing Monitor,Hardware,Dana,Missing\r\n",
+        'All': csv_header + \
+               "Laptop 1,Hardware,Alice,Active\r\n" + \
+               "Software License,Software,Bob,Active\r\n" + \
+               "Old Server,Hardware,Charlie,Retired\r\n" + \
+               "Missing Monitor,Hardware,Dana,Missing\r\n" + \
+               "Keyboard,Hardware,Alice,Active\r\n" + \
+               "Retired Laptop,Hardware,Eve,Retired\r\n",
+        'None': csv_header + \
+                "Laptop 1,Hardware,Alice,Active\r\n" + \
+                "Software License,Software,Bob,Active\r\n" + \
+                "Keyboard,Hardware,Alice,Active\r\n" # Default is Active
+    }
+
+    test_export_statuses = ['Active', 'Retired', 'Missing', 'All', None]
+    for status in test_export_statuses:
+        filter_key = status if status is not None else 'None' # Key for expected_csv dictionary
+        print(f"\nTesting /export_csv with status: {status}")
+        url = url_for('export_csv', status=status) if status is not None else url_for('export_csv')
+        response = client.get(url)
+
+        # Check status code
+        if response.status_code == 200:
+            print(f"  [PASS] Status code: Expected 200, Got {response.status_code}")
+        else:
+            print(f"  [FAIL] Status code: Expected 200, Got {response.status_code}")
+            csv_tests_passed = False
+            all_tests_passed = False
+
+        # Check mimetype
+        if response.mimetype == 'text/csv':
+            print(f"  [PASS] Mimetype: Expected 'text/csv', Got '{response.mimetype}'")
+        else:
+            print(f"  [FAIL] Mimetype: Expected 'text/csv', Got '{response.mimetype}'")
+            csv_tests_passed = False
+            all_tests_passed = False
+
+        # Check Content-Disposition header
+        content_disposition = response.headers.get('Content-Disposition', '')
+        expected_disposition = 'attachment; filename=assets.csv'
+        if expected_disposition in content_disposition:
+            print(f"  [PASS] Content-Disposition: Expected contains '{expected_disposition}', Got '{content_disposition}'")
+        else:
+            print(f"  [FAIL] Content-Disposition: Expected contains '{expected_disposition}', Got '{content_disposition}'")
+            csv_tests_passed = False
+            all_tests_passed = False
+
+        # Check CSV content
+        actual_csv_content = response.data.decode('utf-8')
+        expected_csv_content = expected_csv[filter_key]
+        if actual_csv_content == expected_csv_content:
+            print(f"  [PASS] CSV Content: Matches expected output.")
+            # print(f"      Expected:\n{expected_csv_content}") # Optional: Print for verification
+            # print(f"      Actual:\n{actual_csv_content}")   # Optional: Print for verification
+        else:
+            print(f"  [FAIL] CSV Content: Does not match expected output.")
+            print(f"      Expected:\n{expected_csv_content}") # Print diffs on failure
+            print(f"      Actual:\n{actual_csv_content}")   # Print diffs on failure
+            csv_tests_passed = False
+            all_tests_passed = False
+
 
     print("\n--------------------")
     if all_tests_passed:
@@ -203,6 +310,7 @@ def run_tests():
         print("Some tests FAILED!")
         if not view_session_tests_passed: print(" - /view session setting tests failed")
         if not add_redirect_tests_passed: print(" - /add redirect tests failed")
+        if not csv_tests_passed: print(" - /export_csv tests failed") # Add CSV test result
     print("--------------------")
     return all_tests_passed
 

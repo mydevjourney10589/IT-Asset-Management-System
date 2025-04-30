@@ -14,6 +14,8 @@
             <option value="Retired">Retired</option>
             <option value="Missing">Missing</option>
         </select>
+        &nbsp; <!-- Add some spacing -->
+        <a href="/export_csv?status={{ current_status }}" role="button">Export to CSV</a>
     </div>
     <br>
 
@@ -40,7 +42,8 @@
 
     <script>
         const statusFilter = document.getElementById('statusFilter');
-        const currentStatus = '{{ current_status or "All" }}'; // Get status from Flask context or default to "All"
+        // Get the current status passed from Flask (already defaults to 'Active' server-side if needed)
+        const currentStatus = '{{ current_status }}';
 
         // Set the initial value of the dropdown
         statusFilter.value = currentStatus;
