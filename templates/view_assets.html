@@ -6,17 +6,22 @@
 <body>
     <h1>All IT Assets</h1>
 
-    <div>
-        <label for="statusFilter">Filter by Status:</label>
-        <select id="statusFilter">
+    <form method="GET" action="/view" style="margin-bottom: 10px;">
+        <label for="statusFilter">Status:</label>
+        <select id="statusFilter" name="status"> <!-- Moved inside form, added name -->
             <option value="All">All</option>
             <option value="Active">Active</option>
             <option value="Retired">Retired</option>
             <option value="Missing">Missing</option>
         </select>
-        &nbsp; <!-- Add some spacing -->
-        <a href="/export_csv?status={{ current_status }}" role="button">Export to CSV</a>
-    </div>
+        &nbsp;&nbsp; <!-- Spacing -->
+        <label for="searchTerm">Search:</label>
+        <input type="text" id="searchTerm" name="search_term" placeholder="Asset name or assignee..." value="{{ search_term or '' }}"> <!-- Added search input -->
+        &nbsp;&nbsp; <!-- Spacing -->
+        <button type="submit">Search/Filter</button> <!-- Added submit button -->
+    </form>
+    <!-- Export link kept separate, now includes search term -->
+    <a href="/export_csv?status={{ current_status }}&search_term={{ search_term or '' }}" role="button">Export to CSV</a>
     <br>
 
     <table border="1">
@@ -31,9 +36,9 @@
         <tbody>
             {% for asset in assets %}
             <tr>
-                <td>{{ asset[1] }}</td>
+                <td>{{ asset[1]|highlight(search_term) }}</td> <!-- Apply highlight filter -->
                 <td>{{ asset[2] }}</td>
-                <td>{{ asset[3] }}</td>
+                <td>{{ asset[3]|highlight(search_term) }}</td> <!-- Apply highlight filter -->
                 <td>{{ asset[4] }}</td>
             </tr>
             {% endfor %}
@@ -48,14 +53,7 @@
         // Set the initial value of the dropdown
         statusFilter.value = currentStatus;
 
-        statusFilter.addEventListener('change', function() {
-            const selectedStatus = this.value;
-            if (selectedStatus.toLowerCase() === 'all') {
-                window.location.href = '/view'; // Redirect to /view without status query param for "All"
-            } else {
-                window.location.href = `/view?status=${selectedStatus}`;
-            }
-        });
+        // Removed the event listener for dropdown change, form submission handles it now.
     </script>
 </body>
 </html>
