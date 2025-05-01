@@ -12,6 +12,7 @@
                 <th>Type</th>
                 <th>Assigned To</th>
                 <th>Status</th>
+                <th>History</th>
             </tr>
         </thead>
         <tbody>
@@ -21,6 +22,7 @@
                 <td>{{ asset[2] }}</td>
                 <td>{{ asset[3] }}</td>
                 <td>{{ asset[4] }}</td>
+                <td><a href="{{ url_for('view_asset_history', asset_id=asset[0]) }}">View History</a></td>
             </tr>
             {% endfor %}
         </tbody>

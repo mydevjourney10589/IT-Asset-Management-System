@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Assignment History for {{ asset_name }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>Assignment History for {{ asset_name }} (ID: {{ asset_id }})</h1>
+
+    {% if history %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Assigned To</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in history %}
+                    <tr>
+                        <td>{{ record['employee_name'] }}</td>
+                        <td>{{ record['assignment_timestamp'] }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No assignment history found for this asset.</p>
+    {% endif %}
+
+    <br>
+    <a href="{{ url_for('view_assets') }}">Back to Asset List</a>
+    <br>
+    <a href="{{ url_for('index') }}">Back to Home</a>
+</body>
+</html>
