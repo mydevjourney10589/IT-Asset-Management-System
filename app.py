@@ -1,13 +1,12 @@
-from flask import Flask, render_template, request, redirect, session, url_for, Response # Import Response
+from flask import Flask # Keep Flask
 import sqlite3
 import os # Import os module
-import io # Import io for CSV
-import csv # Import csv module
-import re # Import re for regex
-from markupsafe import Markup # Import Markup for safe HTML rendering
+# Removed imports: render_template, request, redirect, session, url_for, Response, io, csv, re, Markup
+from routes import routes_bp # Import the Blueprint
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24) # Add secret key for sessions
+app.register_blueprint(routes_bp) # Register the Blueprint
 
 # Initialize DB
 def init_db():
@@ -57,154 +56,9 @@ def populate_test_data():
     conn.close()
     print("Test data populated.")
 
-def get_assets_by_status(status_filter=None, search_term=None):
-    """Fetches assets from the database, optionally filtering by status and search term."""
-    conn = sqlite3.connect('assets.db')
-    c = conn.cursor()
-    query = "SELECT * FROM assets"
-    params = []
-    conditions = []
+# get_assets_by_status moved to routes.py
 
-    # Status condition
-    if status_filter and status_filter.lower() != 'all':
-        conditions.append("LOWER(status) = LOWER(?)")
-        params.append(status_filter)
-
-    # Search condition (case-insensitive search on asset_name or assigned_to)
-    if search_term: # Check if search_term is not None and not an empty string
-        conditions.append("(LOWER(asset_name) LIKE LOWER(?) OR LOWER(assigned_to) LIKE LOWER(?))")
-        like_term = f'%{search_term}%'
-        params.append(like_term)
-        params.append(like_term)
-
-    # Combine conditions
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    # Execute query
-    c.execute(query, params)
-    assets = c.fetchall()
-    conn.close()
-    return assets
-
-# Jinja Custom Filter
-@app.template_filter('highlight')
-def highlight(text, query):
-    """Highlights occurrences of query in text using <mark> tags."""
-    if not query or not text:
-        return text
-    # Escape regex characters in query and compile regex for case-insensitive search
-    pattern = re.compile(re.escape(query), re.IGNORECASE)
-    # Replace occurrences with <mark> tags, ensuring the original case is preserved in the highlighted text
-    highlighted_text = pattern.sub(lambda m: f'<mark>{m.group(0)}</mark>', text)
-    return Markup(highlighted_text)
-
-# Routes
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-@app.route('/add', methods=['GET', 'POST'])
-def add_asset():
-    if request.method == 'POST':
-        # Retrieve form data
-        asset_name = request.form.get('asset_name') # Use .get for safer retrieval
-        asset_type = request.form.get('asset_type')
-        assigned_to = request.form.get('assigned_to') # This field is optional, no validation needed here
-        status = request.form.get('status')
-
-        # Initialize errors dictionary
-        errors = {}
-
-        # Validate Asset Name
-        if not asset_name or not asset_name.strip():
-            errors['asset_name'] = "Asset Name is required."
-
-        # Validate Asset Type
-        if not asset_type or not asset_type.strip():
-            errors['asset_type'] = "Asset Type is required."
-
-        # Validate Status
-        allowed_statuses = ['Active', 'Retired', 'Missing']
-        if not status or status not in allowed_statuses: # Also check if status is missing
-            errors['status'] = "Invalid status selected. Must be Active, Retired, or Missing."
-
-        # Check if there were any validation errors
-        if errors:
-            # Re-render the form with errors and submitted data
-            return render_template('add_asset.html',
-                                   errors=errors,
-                                   asset_name=asset_name,
-                                   asset_type=asset_type,
-                                   assigned_to=assigned_to,
-                                   status=status)
-        else:
-            # --- Validation Succeeded: Proceed with database insertion ---
-            conn = sqlite3.connect('assets.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO assets (asset_name, asset_type, assigned_to, status) VALUES (?, ?, ?, ?)",
-                  (asset_name, asset_type, assigned_to, status))
-            conn.commit()
-            conn.close()
-
-            # Retrieve last status filter from session, default to 'Active'
-            last_status = session.get('last_status_filter', 'Active')
-            # Redirect back to the view page with the last used filter applied
-            return redirect(url_for('view_assets', status=last_status))
-
-    # Handle GET request
-    return render_template('add_asset.html', errors={}) # Pass empty errors for GET
-
-@app.route('/view')
-def view_assets():
-    requested_status = request.args.get('status') # Get status from the actual request
-    search_term = request.args.get('search_term', '').strip() # Get search term, default to empty, strip whitespace
-
-    # Default to 'Active' if no status is provided in the URL
-    status_filter = requested_status if requested_status is not None else 'Active'
-    # Store the applied filter in the session
-    session['last_status_filter'] = status_filter
-
-    # Pass both status_filter and search_term to the helper function (helper needs update)
-    assets = get_assets_by_status(status_filter, search_term)
-
-    # Pass filter, search term, and assets to the template
-    return render_template('view_assets.html',
-                           assets=assets,
-                           current_status=status_filter,
-                           search_term=search_term)
-
-@app.route('/export_csv')
-def export_csv():
-    """Exports the currently filtered assets to a CSV file."""
-    requested_status = request.args.get('status')
-    # Default to 'Active' if no status is provided in the URL query parameter
-    status_filter = requested_status if requested_status is not None else 'Active'
-    # Also retrieve the search term
-    search_term = request.args.get('search_term', '').strip()
-
-    # Fetch the assets using the helper, passing both filters
-    assets = get_assets_by_status(status_filter, search_term)
-
-    # Generate CSV data in memory
-    si = io.StringIO()
-    writer = csv.writer(si)
-
-    # Write header row (matching the columns in view_assets.html)
-    writer.writerow(['Asset Name', 'Type', 'Assigned To', 'Status'])
-
-    # Write data rows from the fetched assets (indices 1, 2, 3, 4)
-    for asset in assets:
-        writer.writerow([asset[1], asset[2], asset[3], asset[4]])
-
-    csv_data = si.getvalue()
-
-    # Create the Flask Response object
-    response = Response(csv_data, mimetype='text/csv')
-    # Set headers for file download
-    response.headers['Content-Disposition'] = 'attachment; filename=assets.csv'
-
-    return response
+# Jinja Custom Filter and Routes moved to routes.py
 
 # Test Runner Function
 def run_tests():
@@ -216,6 +70,8 @@ def run_tests():
     # --- Test Section: get_assets_by_status ---
     print("\n--- Testing get_assets_by_status Helper ---")
     get_assets_tests_passed = True
+    # Import the function from routes for direct testing
+    from routes import get_assets_by_status
     # Test cases: (status_filter, search_term, expected_ids) - Using IDs for precise checks
     get_assets_test_cases = [
         # Status only
@@ -533,8 +389,11 @@ def run_tests():
 
 
     # --- Test Section: highlight Filter ---
+    # --- Test Section: highlight Filter ---
     print("\n--- Testing highlight Filter ---")
     highlight_tests_passed = True
+    # Import the function from routes for direct testing
+    from routes import highlight
     # Test cases: (input_text, query, expected_output)
     highlight_test_cases = [
         # Basic cases
@@ -754,8 +613,9 @@ def run_tests():
     return all_tests_passed
 
 
-# Add import for patch
+# Add import for patch and url_for (needed for tests)
 from unittest.mock import patch
+from flask import url_for
 
 if __name__ == '__main__':
     # Run tests before starting the server
