@@ -5,11 +5,46 @@
 </head>
 <body>
     <h1>Add New IT Asset</h1>
+
+    {% if errors %}
+      <div style="color: red;">
+        <p>Please fix the following errors:</p>
+        <ul>
+          {% for field, message in errors.items() %}
+            <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+
     <form method="POST">
-        <input type="text" name="asset_name" placeholder="Asset Name" required><br><br>
-        <input type="text" name="asset_type" placeholder="Asset Type (Laptop/Server/Software)" required><br><br>
-        <input type="text" name="assigned_to" placeholder="Assigned To (Employee Name)" required><br><br>
-        <input type="text" name="status" placeholder="Status (Active/Retired/Missing)" required><br><br>
+        <div>
+            <label for="asset_name">Asset Name:</label>
+            <input type="text" id="asset_name" name="asset_name" placeholder="Asset Name" value="{{ asset_name or '' }}">
+            {% if errors.asset_name %}<span style="color: red;"> {{ errors.asset_name }}</span>{% endif %}
+        </div>
+        <br>
+        <div>
+            <label for="asset_type">Asset Type:</label>
+            <input type="text" id="asset_type" name="asset_type" placeholder="Laptop/Server/Software" value="{{ asset_type or '' }}">
+            {% if errors.asset_type %}<span style="color: red;"> {{ errors.asset_type }}</span>{% endif %}
+        </div>
+        <br>
+        <div>
+            <label for="assigned_to">Assigned To:</label>
+            <input type="text" id="assigned_to" name="assigned_to" placeholder="Employee Name (Optional)" value="{{ assigned_to or '' }}">
+        </div>
+        <br>
+        <div>
+            <label for="status">Status:</label>
+            <select id="status" name="status">
+                <option value="Active" {% if status == 'Active' %}selected{% endif %}>Active</option>
+                <option value="Retired" {% if status == 'Retired' %}selected{% endif %}>Retired</option>
+                <option value="Missing" {% if status == 'Missing' %}selected{% endif %}>Missing</option>
+            </select>
+            {% if errors.status %}<span style="color: red;"> {{ errors.status }}</span>{% endif %}
+        </div>
+        <br>
         <button type="submit">Add Asset</button>
     </form>
 </body>

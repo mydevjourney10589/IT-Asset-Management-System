@@ -107,24 +107,53 @@ def index():
 @app.route('/add', methods=['GET', 'POST'])
 def add_asset():
     if request.method == 'POST':
-        asset_name = request.form['asset_name']
-        asset_type = request.form['asset_type']
-        assigned_to = request.form['assigned_to']
-        status = request.form['status']
+        # Retrieve form data
+        asset_name = request.form.get('asset_name') # Use .get for safer retrieval
+        asset_type = request.form.get('asset_type')
+        assigned_to = request.form.get('assigned_to') # This field is optional, no validation needed here
+        status = request.form.get('status')
 
-        conn = sqlite3.connect('assets.db')
+        # Initialize errors dictionary
+        errors = {}
+
+        # Validate Asset Name
+        if not asset_name or not asset_name.strip():
+            errors['asset_name'] = "Asset Name is required."
+
+        # Validate Asset Type
+        if not asset_type or not asset_type.strip():
+            errors['asset_type'] = "Asset Type is required."
+
+        # Validate Status
+        allowed_statuses = ['Active', 'Retired', 'Missing']
+        if not status or status not in allowed_statuses: # Also check if status is missing
+            errors['status'] = "Invalid status selected. Must be Active, Retired, or Missing."
+
+        # Check if there were any validation errors
+        if errors:
+            # Re-render the form with errors and submitted data
+            return render_template('add_asset.html',
+                                   errors=errors,
+                                   asset_name=asset_name,
+                                   asset_type=asset_type,
+                                   assigned_to=assigned_to,
+                                   status=status)
+        else:
+            # --- Validation Succeeded: Proceed with database insertion ---
+            conn = sqlite3.connect('assets.db')
         c = conn.cursor()
         c.execute("INSERT INTO assets (asset_name, asset_type, assigned_to, status) VALUES (?, ?, ?, ?)",
                   (asset_name, asset_type, assigned_to, status))
-        conn.commit()
-        conn.close()
+            conn.commit()
+            conn.close()
 
-        # Retrieve last status filter from session, default to 'Active'
-        last_status = session.get('last_status_filter', 'Active')
-        # Redirect back to the view page with the last used filter applied
-        return redirect(url_for('view_assets', status=last_status))
+            # Retrieve last status filter from session, default to 'Active'
+            last_status = session.get('last_status_filter', 'Active')
+            # Redirect back to the view page with the last used filter applied
+            return redirect(url_for('view_assets', status=last_status))
 
-    return render_template('add_asset.html')
+    # Handle GET request
+    return render_template('add_asset.html', errors={}) # Pass empty errors for GET
 
 @app.route('/view')
 def view_assets():
@@ -549,6 +578,163 @@ def run_tests():
     if not highlight_tests_passed: print(" - highlight filter tests failed")
 
 
+    # --- Test Section: /add Validation ---
+    print("\n--- Testing /add Validation ---")
+    add_validation_tests_passed = True
+
+    def get_db_count():
+        """Helper to get current asset count."""
+        conn = sqlite3.connect('assets.db')
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM assets")
+        count = c.fetchone()[0]
+        conn.close()
+        return count
+
+    # --- Invalid Submission Tests ---
+    invalid_add_cases = [
+        (
+            "Missing Asset Name",
+            {'asset_name': '', 'asset_type': 'TestType', 'status': 'Active'},
+            ["Asset Name is required."],
+            {'asset_type': 'TestType', 'status': 'Active'}
+        ),
+        (
+            "Missing Asset Type",
+            {'asset_name': 'TestName', 'asset_type': ' ', 'status': 'Active'},
+            ["Asset Type is required."],
+            {'asset_name': 'TestName', 'status': 'Active'}
+        ),
+        (
+            "Invalid Status",
+            {'asset_name': 'TestName', 'asset_type': 'TestType', 'status': 'Broken'},
+            ["Invalid status selected"],
+            {'asset_name': 'TestName', 'asset_type': 'TestType'}
+        ),
+        (
+            "Multiple Errors",
+            {'asset_name': '', 'asset_type': '', 'status': 'Invalid'},
+            ["Asset Name is required.", "Asset Type is required.", "Invalid status selected"],
+            {} # No fields expected to be repopulated correctly with empty/invalid initial data
+        ),
+    ]
+
+    for name, post_data, expected_errors, expected_values in invalid_add_cases:
+        print(f"\nTesting Invalid Add: {name}")
+        populate_test_data() # Reset DB for each case
+        initial_count = get_db_count()
+        response = client.post(url_for('add_asset'), data=post_data, follow_redirects=False)
+        html = response.data.decode()
+
+        test_passed = True
+        # Check status code 200 (re-render)
+        if response.status_code == 200:
+            print(f"  [PASS] Status code: Expected 200, Got {response.status_code}")
+        else:
+            print(f"  [FAIL] Status code: Expected 200, Got {response.status_code}")
+            test_passed = False
+
+        # Check error messages
+        for error_msg in expected_errors:
+            if error_msg in html:
+                print(f"  [PASS] Error message found: '{error_msg}'")
+            else:
+                print(f"  [FAIL] Error message NOT found: '{error_msg}'")
+                test_passed = False
+
+        # Check retained values
+        for field, value in expected_values.items():
+             # Check input fields
+             if field in ['asset_name', 'asset_type', 'assigned_to']:
+                 expected_input_html = f'name="{field}" value="{value}"'
+                 if expected_input_html in html:
+                      print(f"  [PASS] Retained value: Field '{field}' has value '{value}'")
+                 else:
+                      print(f"  [FAIL] Retained value: Field '{field}' did not have value '{value}'. Check HTML: {expected_input_html}")
+                      test_passed = False
+             # Check select field
+             elif field == 'status':
+                  expected_select_html = f'<option value="{value}" selected'
+                  if expected_select_html in html:
+                       print(f"  [PASS] Retained value: Status '{value}' is selected")
+                  else:
+                       print(f"  [FAIL] Retained value: Status '{value}' was not selected. Check HTML: {expected_select_html}")
+                       test_passed = False
+
+
+        # Check DB count (should not change)
+        final_count = get_db_count()
+        if final_count == initial_count:
+            print(f"  [PASS] DB Count: Unchanged ({initial_count})")
+        else:
+            print(f"  [FAIL] DB Count: Changed from {initial_count} to {final_count}")
+            test_passed = False
+
+        if not test_passed:
+            add_validation_tests_passed = False
+            all_tests_passed = False # Update overall status
+
+    # --- Valid Submission Test ---
+    print("\nTesting Valid Add Submission")
+    populate_test_data() # Reset DB
+    initial_count = get_db_count()
+    valid_data = {
+        'asset_name': 'ValidAsset-XYZ',
+        'asset_type': 'ValidType',
+        'assigned_to': 'Test User',
+        'status': 'Retired'
+    }
+    # Set session before POST to check redirect correctly
+    with client.session_transaction() as sess:
+        sess['last_status_filter'] = 'All' # Set a known previous filter
+
+    response = client.post(url_for('add_asset'), data=valid_data, follow_redirects=False)
+    valid_test_passed = True
+
+    # Check status code 302 (redirect)
+    if response.status_code == 302:
+        print(f"  [PASS] Status code: Expected 302, Got {response.status_code}")
+    else:
+        print(f"  [FAIL] Status code: Expected 302, Got {response.status_code}")
+        valid_test_passed = False
+
+    # Check redirect location (should redirect back to view with last status filter)
+    expected_redirect_location = url_for('view_assets', status='All')
+    actual_location = response.location
+    if actual_location and actual_location.endswith(expected_redirect_location):
+         print(f"  [PASS] Redirect location: Expected ends with '{expected_redirect_location}', Got '{actual_location}'")
+    else:
+         print(f"  [FAIL] Redirect location: Expected ends with '{expected_redirect_location}', Got '{actual_location}'")
+         valid_test_passed = False
+
+
+    # Check DB count (should increase by 1)
+    final_count = get_db_count()
+    if final_count == initial_count + 1:
+        print(f"  [PASS] DB Count: Increased from {initial_count} to {final_count}")
+    else:
+        print(f"  [FAIL] DB Count: Expected {initial_count + 1}, Got {final_count}")
+        valid_test_passed = False
+
+    # Check if the specific asset was added correctly
+    conn = sqlite3.connect('assets.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM assets WHERE asset_name = ?", (valid_data['asset_name'],))
+    new_asset = c.fetchone()
+    conn.close()
+    if new_asset and new_asset[1] == valid_data['asset_name'] and new_asset[2] == valid_data['asset_type'] and new_asset[3] == valid_data['assigned_to'] and new_asset[4] == valid_data['status']:
+        print(f"  [PASS] DB Verification: Found new asset '{valid_data['asset_name']}' with correct details.")
+    else:
+        print(f"  [FAIL] DB Verification: Could not find new asset '{valid_data['asset_name']}' with correct details.")
+        valid_test_passed = False
+
+    if not valid_test_passed:
+        add_validation_tests_passed = False
+        all_tests_passed = False # Update overall status
+
+    if not add_validation_tests_passed: print(" - /add validation tests failed")
+
+
     # --- Final Reporting ---
     print("\n--------------------")
     if all_tests_passed:
@@ -560,7 +746,8 @@ def run_tests():
         if not get_assets_tests_passed: print("   - get_assets_by_status tests failed")
         if not view_render_tests_passed: print("   - /view render tests failed")
         if not view_session_tests_passed: print("   - /view session setting tests failed")
-        if not add_redirect_tests_passed: print("   - /add redirect tests failed")
+        if not add_redirect_tests_passed: print("   - /add redirect tests failed") # Note: This section might be partially redundant now
+        if not add_validation_tests_passed: print("   - /add validation tests failed")
         if not csv_tests_passed: print("   - /export_csv search tests failed")
         if not highlight_tests_passed: print("   - highlight filter tests failed")
     print("--------------------")
